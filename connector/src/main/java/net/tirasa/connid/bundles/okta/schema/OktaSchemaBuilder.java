@@ -1,12 +1,12 @@
 /**
  * Copyright © 2019 ConnId (connid-dev@googlegroups.com)
- *
+ * <p>
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * <p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -18,23 +18,14 @@ package net.tirasa.connid.bundles.okta.schema;
 
 import com.okta.sdk.client.Client;
 import com.okta.sdk.resource.ExtensibleResource;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.EnumSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
 import net.tirasa.connid.bundles.okta.OktaConnector;
 import net.tirasa.connid.bundles.okta.utils.OktaAttribute;
 import org.identityconnectors.common.logging.Log;
-import org.identityconnectors.framework.common.objects.AttributeInfo;
+import org.identityconnectors.framework.common.objects.*;
 import org.identityconnectors.framework.common.objects.AttributeInfo.Flags;
-import org.identityconnectors.framework.common.objects.AttributeInfoBuilder;
-import org.identityconnectors.framework.common.objects.ObjectClass;
-import org.identityconnectors.framework.common.objects.ObjectClassInfo;
-import org.identityconnectors.framework.common.objects.ObjectClassInfoBuilder;
-import org.identityconnectors.framework.common.objects.Schema;
-import org.identityconnectors.framework.common.objects.SchemaBuilder;
+import org.identityconnectors.framework.spi.operations.SearchOp;
+
+import java.util.*;
 
 class OktaSchemaBuilder {
 
@@ -82,6 +73,8 @@ class OktaSchemaBuilder {
         buildAccount(ObjectClass.ACCOUNT_NAME, schemaBld);
         buildGroup(ObjectClass.GROUP_NAME, schemaBld);
         buildApplication(OktaConnector.APPLICATION_NAME, schemaBld);
+//        schemaBld.defineOperationOption(OperationOptionInfoBuilder.buildAttributesToGet(), SearchOp.class);
+//        schemaBld.defineOperationOption(OperationOptionInfoBuilder.buildReturnDefaultAttributes(), SearchOp.class);
         schema = schemaBld.build();
     }
 
@@ -107,7 +100,7 @@ class OktaSchemaBuilder {
         schemaBld.defineObjectClass(oci);
     }
 
-    @SuppressWarnings({ "unchecked" })
+    @SuppressWarnings({"unchecked"})
     private Collection<AttributeInfo> buildAccountAttrInfos() {
         LOG.ok("Retrieve User schema profile");
         final List<AttributeInfo> attributeInfos = new ArrayList<>();
@@ -117,7 +110,7 @@ class OktaSchemaBuilder {
         ATTRS_TYPE.stream().forEach(item -> {
             List<String> requiredAttrs = ((Map<String, List<String>>) definitions.get(item)).get(REQUIRED);
             Map<String, Object> schemas = (Map<String, Object>) definitions.get(item);
-            ((Map<String, Object>) schemas.get(PROPERTIES)).entrySet().stream().forEach(
+            ((Map<String, Object>) schemas.get(PROPERTIES)).entrySet().stream().filter(p -> !p.getKey().equals(OktaAttribute.LOGIN)).forEach(
                     schemaDef -> {
                         final Set<AttributeInfo.Flags> flags = EnumSet.noneOf(Flags.class);
                         final AttributeInfoBuilder attributeInfo = new AttributeInfoBuilder();
@@ -127,27 +120,66 @@ class OktaSchemaBuilder {
                     });
         });
 
-        final AttributeInfoBuilder attributeInfo = new AttributeInfoBuilder();
-        attributeInfo.setRequired(true);
-        attributeInfos.add(AttributeInfoBuilder.build(OktaAttribute.ID, String.class));
+        attributeInfos.add(AttributeInfoBuilder.define(Uid.NAME)
+                .setRequired(false) // Must be optional. It is not present for create operations
+                .setCreateable(false)
+                .setUpdateable(false)
+                .setNativeName(OktaAttribute.USER_ID)
+                .build());
+
+        attributeInfos.add(AttributeInfoBuilder.define(Name.NAME)
+                .setRequired(true) // Must be optional. It is not present for create operations
+                .setSubtype(AttributeInfo.Subtypes.STRING_CASE_IGNORE)
+                .setNativeName(OktaAttribute.LOGIN)
+                .build());
+
+        attributeInfos.add(AttributeInfoBuilder.define(OktaAttribute.OKTA_GROUPS, String.class)
+                .setMultiValued(true)
+                .setReturnedByDefault(false)
+                .build());
+
         return attributeInfos;
     }
 
     private Collection<AttributeInfo> buildGroupAttrInfos() {
         LOG.ok("Retrieve Group schema profile");
         final List<AttributeInfo> attributeInfos = new ArrayList<>();
-        attributeInfos.add(AttributeInfoBuilder.build(OktaAttribute.ID, String.class));
-        attributeInfos.add(AttributeInfoBuilder.build(OktaAttribute.NAME, String.class, EnumSet.of(Flags.REQUIRED)));
         attributeInfos.add(AttributeInfoBuilder.build(OktaAttribute.DESCRIPTION, String.class));
+
+        attributeInfos.add(AttributeInfoBuilder.define(Uid.NAME)
+                .setRequired(false) // Must be optional. It is not present for create operations
+                .setCreateable(false)
+                .setUpdateable(false)
+                .setNativeName(OktaAttribute.GROUP_ID)
+                .build());
+
+        attributeInfos.add(AttributeInfoBuilder.define(Name.NAME)
+                .setRequired(true) // Must be optional. It is not present for create operations
+                .setSubtype(AttributeInfo.Subtypes.STRING_CASE_IGNORE)
+                .setNativeName(OktaAttribute.NAME)
+                .build());
+
         return attributeInfos;
     }
 
     private Collection<AttributeInfo> buildApplicationAttrInfos() {
         LOG.ok("Retrieve Application schema profile");
         final List<AttributeInfo> attributeInfos = new ArrayList<>();
-        attributeInfos.add(AttributeInfoBuilder.build(OktaAttribute.ID, String.class));
-        attributeInfos.add(AttributeInfoBuilder.build(OktaAttribute.NAME, String.class, EnumSet.of(Flags.REQUIRED)));
         attributeInfos.add(AttributeInfoBuilder.build(OktaAttribute.LABEL, String.class));
+
+        attributeInfos.add(AttributeInfoBuilder.define(Uid.NAME)
+                .setRequired(false) // Must be optional. It is not present for create operations
+                .setCreateable(false)
+                .setUpdateable(false)
+                .setNativeName(OktaAttribute.APPLICATION_ID)
+                .build());
+
+        attributeInfos.add(AttributeInfoBuilder.define(Name.NAME)
+                .setRequired(true) // Must be optional. It is not present for create operations
+                .setSubtype(AttributeInfo.Subtypes.STRING_CASE_IGNORE)
+                .setNativeName(OktaAttribute.NAME)
+                .build());
+
         return attributeInfos;
     }
 }

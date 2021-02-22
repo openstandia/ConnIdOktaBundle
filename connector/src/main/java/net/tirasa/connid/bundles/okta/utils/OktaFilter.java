@@ -15,13 +15,16 @@
  */
 package net.tirasa.connid.bundles.okta.utils;
 
+import org.identityconnectors.framework.common.objects.Name;
+import org.identityconnectors.framework.common.objects.Uid;
+
 import java.util.Arrays;
 import java.util.List;
 
 public class OktaFilter {
 
     public static final List<String> SEARCH_ATTRS =
-            Arrays.asList(OktaAttribute.ID, OktaAttribute.buildProfileAttrName(OktaAttribute.LOGIN));
+            Arrays.asList(Uid.NAME, Name.NAME);
 
     private final OktaFilterOp filterOp;
 

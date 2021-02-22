@@ -43,7 +43,11 @@ public final class OktaAttribute {
 
     private static final Log LOG = Log.getLog(OktaAttribute.class);
 
-    public static final String ID = "id";
+    public static final String USER_ID = "userId";
+
+    public static final String GROUP_ID = "groupId";
+
+    public static final String APPLICATION_ID = "applicationId";
 
     public static final String STATUS = "status";
 
@@ -121,9 +125,9 @@ public final class OktaAttribute {
         UserProfile userProfile = user.getProfile();
         attributesToGet.stream().forEach((String attributeToGetName) -> {
             if (Name.NAME.equals(attributeToGetName)
-                    || Uid.NAME.equals(attributeToGetName)
-                    || OktaAttribute.ID.equals(attributeToGetName)) {
-                attributes.add(AttributeBuilder.build(attributeToGetName, user.getId()));
+                    || Uid.NAME.equals(attributeToGetName)) {
+                // Do nothing
+
             } else if (STATUS.equals(attributeToGetName)) {
                 attributes.add(buildAttribute(user.getStatus().toString(), attributeToGetName, String.class).build());
             } else if (OperationalAttributes.ENABLE_NAME.equals(attributeToGetName)) {
@@ -132,7 +136,10 @@ public final class OktaAttribute {
             } else if (OKTA_GROUPS.equals(attributeToGetName)) {
                 try {
                     List<String> assignedGroups =
-                            user.listGroups().stream().map(item -> item.getId()).collect(Collectors.toList());
+                            user.listGroups().stream()
+                                    .filter(item -> !(item.getType().equals("BUILT_IN") && item.getProfile().getName().equals("Everyone")))
+                                    .map(item -> item.getId())
+                                    .collect(Collectors.toList());
                     attributes.add(buildAttribute(assignedGroups, attributeToGetName, Set.class).build());
                 } catch (Exception ex) {
                     LOG.error(ex, "Could not list groups for User {0}", user.getId());
@@ -167,10 +174,9 @@ public final class OktaAttribute {
         ObjectClassInfo objectClassInfo = schema.findObjectClassInfo(objName);
         attributesToGet.stream().forEach(attributeToGetName -> {
             if (Name.NAME.equals(attributeToGetName)
-                    || Uid.NAME.equals(attributeToGetName)
-                    || OktaAttribute.ID.equals(attributeToGetName)) {
+                    || Uid.NAME.equals(attributeToGetName)) {
+                // Do nothing
 
-                attributes.add(AttributeBuilder.build(attributeToGetName, resource.getString(ID)));
             } else if (STATUS.equals(attributeToGetName)) {
                 AttributeBuilder attributeBuilder = new AttributeBuilder();
                 attributeBuilder.setName(attributeToGetName);

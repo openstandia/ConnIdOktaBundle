@@ -27,69 +27,27 @@ import com.okta.sdk.resource.ResourceException;
 import com.okta.sdk.resource.application.Application;
 import com.okta.sdk.resource.application.ApplicationList;
 import com.okta.sdk.resource.group.Group;
+import com.okta.sdk.resource.group.GroupBuilder;
 import com.okta.sdk.resource.group.GroupList;
 import com.okta.sdk.resource.log.LogEvent;
 import com.okta.sdk.resource.log.LogEventList;
-import com.okta.sdk.resource.user.ChangePasswordRequest;
-import com.okta.sdk.resource.user.PasswordCredential;
-import com.okta.sdk.resource.user.User;
-import com.okta.sdk.resource.user.UserBuilder;
-import com.okta.sdk.resource.user.UserCredentials;
-import com.okta.sdk.resource.user.UserList;
-import com.okta.sdk.resource.user.UserStatus;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Optional;
-import java.util.Set;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
+import com.okta.sdk.resource.user.*;
 import net.tirasa.connid.bundles.okta.schema.OktaSchema;
-import net.tirasa.connid.bundles.okta.utils.CipherAlgorithm;
-import net.tirasa.connid.bundles.okta.utils.OktaAttribute;
-import net.tirasa.connid.bundles.okta.utils.OktaEventType;
-import net.tirasa.connid.bundles.okta.utils.OktaFilter;
-import net.tirasa.connid.bundles.okta.utils.OktaFilterOp;
-import net.tirasa.connid.bundles.okta.utils.OktaUtils;
+import net.tirasa.connid.bundles.okta.utils.*;
 import org.identityconnectors.common.CollectionUtil;
 import org.identityconnectors.common.StringUtil;
 import org.identityconnectors.common.logging.Log;
 import org.identityconnectors.common.security.GuardedString;
 import org.identityconnectors.common.security.SecurityUtil;
 import org.identityconnectors.framework.common.exceptions.InvalidAttributeValueException;
-import org.identityconnectors.framework.common.objects.Attribute;
-import org.identityconnectors.framework.common.objects.AttributeUtil;
-import org.identityconnectors.framework.common.objects.AttributesAccessor;
-import org.identityconnectors.framework.common.objects.ConnectorObject;
-import org.identityconnectors.framework.common.objects.ConnectorObjectBuilder;
-import org.identityconnectors.framework.common.objects.Name;
-import org.identityconnectors.framework.common.objects.ObjectClass;
-import org.identityconnectors.framework.common.objects.ObjectClassInfo;
-import org.identityconnectors.framework.common.objects.ObjectClassUtil;
-import org.identityconnectors.framework.common.objects.OperationOptions;
-import org.identityconnectors.framework.common.objects.OperationalAttributes;
-import org.identityconnectors.framework.common.objects.ResultsHandler;
-import org.identityconnectors.framework.common.objects.Schema;
-import org.identityconnectors.framework.common.objects.SearchResult;
-import org.identityconnectors.framework.common.objects.SyncDeltaBuilder;
-import org.identityconnectors.framework.common.objects.SyncDeltaType;
-import org.identityconnectors.framework.common.objects.SyncResultsHandler;
-import org.identityconnectors.framework.common.objects.SyncToken;
-import org.identityconnectors.framework.common.objects.Uid;
+import org.identityconnectors.framework.common.objects.*;
 import org.identityconnectors.framework.common.objects.filter.FilterTranslator;
-import org.identityconnectors.framework.spi.Configuration;
-import org.identityconnectors.framework.spi.Connector;
-import org.identityconnectors.framework.spi.ConnectorClass;
-import org.identityconnectors.framework.spi.PoolableConnector;
-import org.identityconnectors.framework.spi.SearchResultsHandler;
-import org.identityconnectors.framework.spi.operations.CreateOp;
-import org.identityconnectors.framework.spi.operations.DeleteOp;
-import org.identityconnectors.framework.spi.operations.SchemaOp;
-import org.identityconnectors.framework.spi.operations.SearchOp;
-import org.identityconnectors.framework.spi.operations.SyncOp;
-import org.identityconnectors.framework.spi.operations.TestOp;
-import org.identityconnectors.framework.spi.operations.UpdateOp;
+import org.identityconnectors.framework.spi.*;
+import org.identityconnectors.framework.spi.operations.*;
+
+import java.util.*;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * Main implementation of the Okta Connector.
@@ -133,8 +91,9 @@ public class OktaConnector implements Connector, PoolableConnector,
 
     private static final Set<String> NOT_FOR_PROFILE = CollectionUtil.newReadOnlySet(
             Name.NAME, OperationalAttributes.ENABLE_NAME, OperationalAttributes.PASSWORD_NAME,
-            OktaAttribute.ID, OktaAttribute.STATUS,
-            OktaAttribute.OKTA_SECURITY_QUESTION, OktaAttribute.OKTA_SECURITY_ANSWER);
+            OktaAttribute.USER_ID, OktaAttribute.STATUS,
+            OktaAttribute.OKTA_SECURITY_QUESTION, OktaAttribute.OKTA_SECURITY_ANSWER,
+            OktaAttribute.OKTA_GROUPS);
 
     private OktaConfiguration configuration;
 
@@ -279,6 +238,16 @@ public class OktaConnector implements Connector, PoolableConnector,
             }
 
             return new Uid(result.getId());
+        } else if (ObjectClass.GROUP.equals(objectClass)) {
+
+            GroupBuilder groupBuilder = GroupBuilder.instance();
+
+            Group result = groupBuilder.setName(accessor.getName().getNameValue())
+                    .setDescription(accessor.findString(OktaAttribute.DESCRIPTION))
+                    .buildAndCreate(client);
+
+            return new Uid(result.getId());
+
         } else {
             LOG.warn("Create of type {0} is not supported", objectClass.getObjectClassValue());
             throw new UnsupportedOperationException("Create of type"
@@ -333,15 +302,18 @@ public class OktaConnector implements Connector, PoolableConnector,
                 OktaUtils.wrapGeneralError("Could not update User " + uid.getUidValue() + " from attributes ", e);
             }
 
-            if (accessor.findList(OktaAttribute.OKTA_GROUPS) != null) {
+            if (accessor.hasAttribute(OktaAttribute.OKTA_GROUPS)) {
                 try {
                     //Assign User to Groups
                     final List<Object> groupsToAssign =
                             CollectionUtil.nullAsEmpty(accessor.findList(OktaAttribute.OKTA_GROUPS));
 
                     final Set<String> assignedGroups = Optional.ofNullable(user.listGroups())
-                            .map(GroupList::stream).orElseGet(Stream::empty).map(Group::getId).collect(Collectors.
-                            toSet());
+                            .map(GroupList::stream)
+                            .orElseGet(Stream::empty)
+                            .filter(item -> !(item.getType().equals("BUILT_IN") && item.getProfile().getName().equals("Everyone")))
+                            .map(Group::getId).collect(Collectors.
+                                    toSet());
 
                     CollectionUtil.nullAsEmpty(groupsToAssign).stream().forEach(grp -> {
                         if (!assignedGroups.contains(grp.toString())) {
@@ -374,6 +346,22 @@ public class OktaConnector implements Connector, PoolableConnector,
                 }
             }
             return returnUid;
+        } else if (ObjectClass.GROUP.equals(objectClass)) {
+            Group group = client.getGroup(uid.getUidValue());
+
+            Attribute name = accessor.getName();
+            if (name != null) {
+                group.getProfile().setName(AttributeUtil.getStringValue(name));
+            }
+            Attribute desc = accessor.find(OktaAttribute.DESCRIPTION);
+            if (desc != null) {
+                group.getProfile().setDescription(AttributeUtil.getStringValue(desc));
+            }
+
+            Group update = group.update();
+
+            return new Uid(update.getId());
+
         } else {
             LOG.warn("Update of type {0} is not supported", objectClass.getObjectClassValue());
             throw new UnsupportedOperationException("Update of type"
@@ -686,14 +674,20 @@ public class OktaConnector implements Connector, PoolableConnector,
                 }
             } else {
                 try {
-                    GroupList groups = OktaAttribute.ID.equals(filter.getAttribute())
-                            || OktaAttribute.NAME.equals(filter.getAttribute())
-                            ? client.listGroups(filter.getValue(), null, null)
-                            : client.listGroups(null, filter.toString(), null);
-                    for (Group group : groups) {
-                        if (!handler.handle(fromGroup(group, attributesToGet))) {
-                            LOG.ok("Stop processing of the result set");
-                            break;
+                    if (Uid.NAME.equals(filter.getAttribute())
+                            || Name.NAME.equals(filter.getAttribute())
+                            && OktaFilterOp.EQUALS.equals(filter.getFilterOp())) {
+
+                        Group group = client.getGroup(filter.getValue());
+                        handler.handle(fromGroup(group, attributesToGet));
+
+                    } else {
+                        GroupList groups = client.listGroups();
+                        for (Group group : groups) {
+                            if (!handler.handle(fromGroup(group, attributesToGet))) {
+                                LOG.ok("Stop processing of the result set");
+                                break;
+                            }
                         }
                     }
                 } catch (Exception e) {
@@ -763,7 +757,7 @@ public class OktaConnector implements Connector, PoolableConnector,
         ConnectorObjectBuilder builder = new ConnectorObjectBuilder();
         builder.setObjectClass(ObjectClass.ACCOUNT);
         builder.setUid(user.getId());
-        builder.setName(user.getId());
+        builder.setName(user.getProfile().getLogin());
         return builder.addAttributes(
                 OktaAttribute.buildUserAttributes(client, user, schema.getSchema(), attributesToGet)).build();
     }
@@ -772,7 +766,7 @@ public class OktaConnector implements Connector, PoolableConnector,
         ConnectorObjectBuilder builder = new ConnectorObjectBuilder();
         builder.setObjectClass(APPLICATION);
         builder.setUid(application.getId());
-        builder.setName(application.getId());
+        builder.setName(application.getName());
         return builder.addAttributes(
                 OktaAttribute.buildExtResourceAttributes(client, application,
                         schema.getSchema(), attributesToGet, APPLICATION_NAME)).build();
@@ -782,7 +776,7 @@ public class OktaConnector implements Connector, PoolableConnector,
         ConnectorObjectBuilder builder = new ConnectorObjectBuilder();
         builder.setObjectClass(ObjectClass.GROUP);
         builder.setUid(group.getId());
-        builder.setName(group.getId());
+        builder.setName(group.getProfile().getName());
         return builder.addAttributes(
                 OktaAttribute.buildExtResourceAttributes(client, group,
                         schema.getSchema(), attributesToGet, ObjectClass.GROUP_NAME)).build();
@@ -855,6 +849,7 @@ public class OktaConnector implements Connector, PoolableConnector,
                                 break;
 
                             case OktaAttribute.LOGIN:
+                            case "__NAME__":
                                 userBuilder.setLogin(AttributeUtil.getStringValue(accessor.find(attrName)));
                                 break;
 
@@ -910,6 +905,7 @@ public class OktaConnector implements Connector, PoolableConnector,
                                     break;
 
                                 case OktaAttribute.LOGIN:
+                                case "__NAME__":
                                     user.getProfile().setLogin(AttributeUtil.getStringValue(attribute));
                                     break;
 
